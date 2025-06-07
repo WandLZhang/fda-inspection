@@ -171,7 +171,7 @@ async function analyzeSite(mapImage) {
         console.log('Analysis data:', {
             hasVehicleAnalysis: !!analysisData.vehicle_analysis,
             hasAnnotatedImage: !!analysisData.annotated_image,
-            totalVehicles: analysisData.vehicle_analysis?.total_vehicles,
+            totalClusters: analysisData.vehicle_analysis?.total_clusters,
             clusterCount: analysisData.vehicle_analysis?.clusters?.length
         });
 
@@ -187,7 +187,7 @@ async function analyzeSite(mapImage) {
             throw new Error('Invalid cluster data in analysis response');
         }
 
-        if (!vehicle_analysis.activity_level || !['low', 'high'].includes(vehicle_analysis.activity_level)) {
+        if (!vehicle_analysis.activity_level || !['low', 'high', 'moderate'].includes(vehicle_analysis.activity_level)) {
             console.error('Missing or invalid activity_level:', vehicle_analysis);
             throw new Error('Invalid activity level in analysis response');
         }
@@ -316,11 +316,17 @@ async function analyzeLocation(address) {
         // Update streaming output with final results
         const { activity_level, clusters, observations } = analysisResult.vehicle_analysis;
         let activityDescription;
+        let activityLabel;
         
         if (activity_level === "low") {
-            activityDescription = "Limited vehicle activity detected (6 or fewer vehicles), suggesting minimal or intermittent site usage.";
-        } else {
-            activityDescription = "Significant vehicle activity detected (more than 6 vehicles), indicating active site operations.";
+            activityDescription = "Limited vehicle activity detected, suggesting minimal or intermittent site usage.";
+            activityLabel = "Low";
+        } else if (activity_level === "moderate") {
+            activityDescription = "Moderate vehicle activity detected.";
+            activityLabel = "Moderate";
+        } else { // Handles "high"
+            activityDescription = "Significant vehicle activity detected, indicating active site operations.";
+            activityLabel = "High";
         }
 
         // Add a slight delay to ensure streaming messages are visible
@@ -328,7 +334,7 @@ async function analyzeLocation(address) {
 
         const finalResults = `
             <div class="mt-4">
-                <div class="font-bold mb-2">Activity Level: ${activity_level === "low" ? "Low" : "High"}</div>
+                <div class="font-bold mb-2">Activity Level: ${activityLabel}</div>
                 <div class="mb-4">${activityDescription}</div>
                 <div class="mt-4 text-gray-600">
                 ${observations.map(obs => `
@@ -345,7 +351,7 @@ async function analyzeLocation(address) {
         `;
 
         // Automatically play audio
-        const speechText = `Activity Level: ${activity_level === "low" ? "Low" : "High"}. ${activityDescription} ${observations.join('. ')}`;
+        const speechText = `Activity Level: ${activityLabel}. ${activityDescription} ${observations.join('. ')}`;
         await audioManager.playAudio(speechText);
     } catch (error) {
         if (error.name === 'AbortError') {

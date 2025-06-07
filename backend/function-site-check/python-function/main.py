@@ -1,7 +1,6 @@
 import base64
 import io
 import os
-import re
 import json
 import time
 import logging
@@ -19,7 +18,7 @@ logger = logging.getLogger(__name__)
 genai_client = genai.Client(
     vertexai=True,
     project="gemini-med-lit-review",
-    location="us-central1"
+    location="global"
 )
 
 def compress_image(img: Image.Image, max_size_kb: int = 800) -> Image.Image:
@@ -38,43 +37,9 @@ def compress_image(img: Image.Image, max_size_kb: int = 800) -> Image.Image:
     img_bytes.seek(0)
     return Image.open(img_bytes)
 
-def clean_json_response(text: str) -> str:
-    """Clean and validate JSON response from Gemini"""
-    # Remove any non-JSON text before or after the JSON object
-    text = text.strip()
-    start = text.find('{')
-    end = text.rfind('}') + 1
-    
-    if start == -1 or end == 0:
-        raise ValueError("No JSON object found in response")
-        
-    json_str = text[start:end]
-    
-    # Remove markdown code block markers
-    json_str = json_str.replace('```json', '').replace('```', '').strip()
-    
-    # Fix common JSON formatting issues
-    json_str = json_str.replace('\n', ' ')  # Remove newlines
-    json_str = json_str.replace('  ', ' ')  # Normalize spaces
-    json_str = ' '.join(json_str.split())   # Normalize whitespace
-    
-    # Fix unquoted keys
-    json_str = re.sub(r'([{,])\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:', r'\1"\2":', json_str)
-    
-    # Fix single quotes
-    json_str = json_str.replace("'", '"')
-    
-    # Validate JSON structure
-    try:
-        parsed = json.loads(json_str)
-        return json.dumps(parsed)  # Re-serialize to ensure proper formatting
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse cleaned JSON: {str(e)}\nJSON string: {json_str}")
-        raise ValueError(f"Failed to parse JSON response: {str(e)}")
-
 def analyze_image_stream(img_base64: str) -> tuple[dict, str]:
     """
-    Analyze image with Gemini 2.0 to detect vehicles and draw bounding boxes.
+    Analyze image with Gemini 2.5 to detect vehicles and draw bounding boxes.
     Returns the analysis results and a new base64 image with boxes drawn.
     """
     try:
@@ -92,35 +57,25 @@ def analyze_image_stream(img_base64: str) -> tuple[dict, str]:
         width, height = img.size
 
         # Prepare prompt for Gemini
-        text_prompt = types.Part.from_text("""
+        text_prompt = types.Part.from_text(text="""
     Analyze this satellite image and identify areas with vehicle activity, focusing on groups/clusters of vehicles.
 
-    Vehicle Activity Assessment Rules:
-    1. Look for these characteristics:
-       - Groups/clusters of parked vehicles
-       - Areas with clear vehicle presence
-       - Loading/unloading zones with vehicles
-       
-    2. For each cluster:
-       - Draw ONE box around the entire group of vehicles
-       - Include some margin around the cluster
-       - Don't try to count individual vehicles
-       - Just assess if it's a small cluster (1-3 vehicles) or large cluster (4+ vehicles)
-       - Assign a confidence score (0.0-1.0) based on:
-         * Image clarity in that area
-         * Distinctness of vehicle shapes
-         * Presence of shadows/reflections matching vehicles
-         * Consistent size/shape with typical vehicles
-       
-    3. STRICTLY EXCLUDE:
-       - Ground markings without clear vehicles
-       - Building features or architectural elements
-       - Areas where you're unsure if objects are vehicles
-       - Any cluster with confidence below 0.7
+    Vehicle Activity Assessment:
+    1. Identify all areas where vehicles are present - parking lots, loading zones, street parking, etc.
+    
+    2. For each cluster of vehicles:
+       - Draw ONE bounding box around the entire group
+       - Include appropriate margin around the cluster
+       - Use your judgment about what constitutes a meaningful cluster
+    
+    3. Reflection and Analysis:
+       - After identifying potential clusters, reflect on their clarity, context, and relevance to overall site activity
+       - Only include clusters in the final "clusters" array if you are reasonably confident they represent actual vehicle groups
+       - Consider image quality, shadows, vehicle shapes, and spatial patterns in your assessment
 
     Coordinate System:
     - Origin (0,0) at top-left corner
-    - X increases left to right (width)
+    - X increases left to right (width)  
     - Y increases top to bottom (height)
     - All coordinates normalized to 0-1000 range
     
@@ -128,27 +83,17 @@ def analyze_image_stream(img_base64: str) -> tuple[dict, str]:
     {
         "clusters": [
             {
-                "type": "parking_lot/loading_zone/etc",
-                "box_2d": [y1, x1, y2, x2],  // [top, left, bottom, right]
-                "size": "small/large",  // small = 1-3 vehicles, large = 4+ vehicles
-                "confidence": 0.0-1.0,  // How confident these are actual vehicles
-                "description": "Brief description of cluster location"
+                "box_2d": [y1, x1, y2, x2]  // [top, left, bottom, right] normalized to 0-1000
             }
         ],
-        "total_clusters": number,  // Total number of vehicle clusters found
-        "activity_level": "low/high",  // low = 6 or fewer total vehicles estimated, high = more than 6 vehicles
+        "total_clusters": number,  // Total number of clusters identified
+        "activity_level": "low/high/moderate",  // Overall assessment of site vehicle activity
         "observations": [
-            "Brief description of overall site activity"
+            "Detailed reflection on the identified vehicle activity. Explain your overall confidence in the analysis.",
+            "Describe why the included clusters were deemed significant and any patterns you observed.",
+            "Mention any ambiguities, areas of low confidence, or reasons why some potential vehicle-like objects might have been excluded.",
+            "Summarize the key characteristics of the site's vehicle presence and activity level."
         ]
-    }
-
-    Example of a good cluster detection:
-    {
-        "type": "parking_lot",
-        "box_2d": [100, 150, 200, 300],
-        "size": "large",
-        "confidence": 0.95,
-        "description": "Main parking area with multiple vehicles"
     }
     """)
 
@@ -160,24 +105,50 @@ def analyze_image_stream(img_base64: str) -> tuple[dict, str]:
             )
         ]
 
-        tools = [types.Tool(google_search=types.GoogleSearch())]
+        response_schema = {
+            "type": "OBJECT",
+            "properties": {
+                "clusters": {
+                    "type": "ARRAY",
+                    "items": {
+                        "type": "OBJECT",
+                        "properties": {
+                            "box_2d": {
+                                "type": "ARRAY",
+                                "items": {"type": "NUMBER"}
+                            }
+                        },
+                        "required": ["box_2d"]
+                    }
+                },
+                "total_clusters": {"type": "NUMBER"},
+                "activity_level": {"type": "STRING", "enum": ["low", "high", "moderate"]},
+                "observations": {
+                    "type": "ARRAY",
+                    "items": {"type": "STRING"}
+                }
+            },
+            "required": ["clusters", "total_clusters", "activity_level", "observations"]
+        }
+
         generate_content_config = types.GenerateContentConfig(
-            temperature=0.4,
-            top_p=0.8,
-            max_output_tokens=8192,
-            response_modalities=["TEXT"],
+            temperature=0.5,
+            top_p=1,
+            seed=0,
+            max_output_tokens=65535,
             safety_settings=[
                 types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="OFF"),
                 types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="OFF"),
                 types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="OFF"),
                 types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="OFF")
             ],
-            tools=tools
+            response_mime_type="application/json",
+            response_schema=response_schema
         )
 
         response_text = ""
         for chunk in genai_client.models.generate_content_stream(
-            model="gemini-2.0-flash-exp",
+            model="gemini-2.5-pro-preview-06-05",
             contents=contents,
             config=generate_content_config
         ):
@@ -185,9 +156,8 @@ def analyze_image_stream(img_base64: str) -> tuple[dict, str]:
                 continue
             response_text += chunk.text
 
-        # Clean and validate response text
-        json_str = clean_json_response(response_text)
-        analysis = json.loads(json_str)
+        # Parse JSON response
+        analysis = json.loads(response_text.strip())
         
         # Validate expected structure
         if not isinstance(analysis, dict):
@@ -198,15 +168,11 @@ def analyze_image_stream(img_base64: str) -> tuple[dict, str]:
             raise ValueError("'clusters' is not an array")
         if 'activity_level' not in analysis:
             raise ValueError("Response missing 'activity_level'")
-        if analysis['activity_level'] not in ['low', 'high']:
+        if analysis['activity_level'] not in ['low', 'high', 'moderate']:
             raise ValueError("Invalid activity_level value")
 
-        # Draw boxes only for large clusters with high confidence
+        # Draw boxes for all clusters returned by Gemini
         for cluster in analysis.get('clusters', []):
-            # Skip small clusters or low confidence detections
-            if cluster.get('size') != 'large' or cluster.get('confidence', 0) < 0.7:
-                continue
-                
             coords = cluster['box_2d']
             # Validate coordinate ranges
             if not all(0 <= c <= 1000 for c in coords):
@@ -229,7 +195,7 @@ def analyze_image_stream(img_base64: str) -> tuple[dict, str]:
             y2 = max(0, min(height, int(y2 * height / 1000)))
             
             # Draw cluster bounding box
-            outline_thickness = 3  # Slightly thicker for clusters
+            outline_thickness = 4  # Align with notebook's width
             draw.rectangle(
                 [x1, y1, x2, y2],
                 outline='lime',
