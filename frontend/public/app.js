@@ -29,17 +29,21 @@ class AudioManager {
     constructor() {
         this.currentAudio = null;
         this.currentAudioController = null;
+        this.currentStreamController = null; // For aborting the audio stream fetch
         this.currentEventSource = null;
         this.audioQueue = [];
         this.isStreamPlaying = false;
     }
 
     stopAudio() {
+        console.log('AudioManager: stopAudio called');
+        
         // Stop current audio playback
         if (this.currentAudio) {
             this.currentAudio.pause();
             this.currentAudio.currentTime = 0;
             this.currentAudio = null;
+            console.log('AudioManager: Current audio paused and cleared');
         }
         
         // Abort fetch controller (for old method)
@@ -54,9 +58,17 @@ class AudioManager {
             this.currentEventSource = null;
         }
         
+        // Abort the streaming audio fetch request
+        if (this.currentStreamController) {
+            this.currentStreamController.abort();
+            this.currentStreamController = null;
+            console.log('AudioManager: Current audio stream fetch aborted');
+        }
+        
         // Clear audio queue
         this.audioQueue = [];
         this.isStreamPlaying = false;
+        console.log('AudioManager: Audio queue cleared and stream playing flag reset');
     }
 
     async playAudio(text) {
@@ -102,11 +114,12 @@ class AudioManager {
     }
 
     async _startStreamingAudio(text) {
+        // Create a new AbortController for this specific stream
+        this.currentStreamController = new AbortController();
+        const signal = this.currentStreamController.signal;
+
         try {
-            // For SSE with POST body, we need to use a different approach
-            // Option 1: Use GET with URL params (limited by URL length)
-            // Option 2: Use fetch with ReadableStream
-            // For now, let's use POST with fetch and read the stream manually
+            console.log('AudioManager: Starting new audio stream');
             
             const response = await fetch('https://us-central1-gemini-med-lit-review.cloudfunctions.net/fda-generate-audio', {
                 method: 'POST',
@@ -114,11 +127,12 @@ class AudioManager {
                     'Content-Type': 'application/json',
                     'Accept': 'text/event-stream'  // Signal that we want streaming
                 },
-                body: JSON.stringify({ text })
+                body: JSON.stringify({ text }),
+                signal: signal // Pass the signal to fetch
             });
 
             if (!response.ok) {
-                throw new Error('Failed to start audio stream');
+                throw new Error(`Failed to start audio stream: ${response.status} ${response.statusText}`);
             }
 
             const reader = response.body.getReader();
@@ -126,8 +140,17 @@ class AudioManager {
             let buffer = '';
 
             while (true) {
+                // Check if aborted before reading
+                if (signal.aborted) {
+                    console.log('AudioManager: Stream read loop detected abort signal');
+                    throw new DOMException('Aborted by user', 'AbortError');
+                }
+                
                 const { done, value } = await reader.read();
-                if (done) break;
+                if (done) {
+                    console.log('AudioManager: Stream reader finished (done)');
+                    break;
+                }
 
                 buffer += decoder.decode(value, { stream: true });
                 const lines = buffer.split('\n');
@@ -152,55 +175,86 @@ class AudioManager {
                 }
             }
         } catch (error) {
-            console.error('Error in audio streaming:', error);
-            this.stopAudio();
+            if (error.name === 'AbortError') {
+                console.log('AudioManager: Audio stream fetch was aborted');
+            } else {
+                console.error('AudioManager: Error in audio streaming:', error);
+            }
+        } finally {
+            console.log('AudioManager: _startStreamingAudio finally block');
+            // Clear the controller if it was the one for this stream
+            if (this.currentStreamController && this.currentStreamController.signal === signal) {
+                this.currentStreamController = null;
+                console.log('AudioManager: Cleared stream controller as stream ended');
+            }
         }
     }
 
     _handleStreamEvent(data) {
+        // Check if the stream was aborted
+        if (this.currentStreamController && this.currentStreamController.signal.aborted) {
+            console.log('AudioManager: _handleStreamEvent detected abort, not queuing audio');
+            return;
+        }
+
         if (data.audio) {
             // Add audio chunk to queue
             this.audioQueue.push(data.audio);
-            console.log(`Added audio chunk ${data.sentence_index + 1}/${data.total_sentences} to queue`);
+            console.log(`AudioManager: Added audio chunk ${data.sentence_index + 1}/${data.total_sentences} to queue. Queue size: ${this.audioQueue.length}`);
             
             // Start playing if not already playing
             this._playNextFromQueue();
         } else if (data.error) {
-            console.error('Stream error:', data.error);
+            console.error('AudioManager: Stream error event:', data.error);
         } else if (data.message === 'Stream finished') {
-            console.log('Audio stream finished');
+            console.log('AudioManager: Audio stream finished event received');
         }
     }
 
     _playNextFromQueue() {
         // If already playing or queue is empty, return
         if (this.isStreamPlaying || this.audioQueue.length === 0) {
+            if (this.isStreamPlaying) console.log('AudioManager: _playNextFromQueue - already playing');
+            if (this.audioQueue.length === 0) console.log('AudioManager: _playNextFromQueue - queue empty');
+            return;
+        }
+
+        // Check if the stream was aborted before playing next
+        if (this.currentStreamController && this.currentStreamController.signal.aborted) {
+            console.log('AudioManager: _playNextFromQueue detected abort, not playing next from queue');
+            this.audioQueue = []; // Clear queue as the stream is aborted
+            this.isStreamPlaying = false;
             return;
         }
 
         this.isStreamPlaying = true;
         const audioBase64 = this.audioQueue.shift();
+        console.log(`AudioManager: Playing next from queue. Remaining: ${this.audioQueue.length}`);
 
         // Create audio element
         this.currentAudio = new Audio(`data:audio/wav;base64,${audioBase64}`);
         
         // Set up event handlers
         this.currentAudio.onended = () => {
+            console.log('AudioManager: Audio chunk ended');
             this.isStreamPlaying = false;
+            this.currentAudio = null; // Clear current audio instance
             this._playNextFromQueue(); // Play next chunk
         };
 
         this.currentAudio.onerror = (error) => {
-            console.error('Error playing audio chunk:', error);
+            console.error('AudioManager: Error playing audio chunk:', error);
             this.isStreamPlaying = false;
+            this.currentAudio = null; // Clear current audio instance
             // Try to play next chunk
             this._playNextFromQueue();
         };
 
         // Start playback
         this.currentAudio.play().catch(error => {
-            console.error('Failed to play audio:', error);
+            console.error('AudioManager: Failed to play audio chunk:', error);
             this.isStreamPlaying = false;
+            this.currentAudio = null; // Clear current audio instance
             this._playNextFromQueue();
         });
     }
