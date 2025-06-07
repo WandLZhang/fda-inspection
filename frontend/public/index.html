@@ -4,36 +4,32 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FDA Inspection Tool</title>
-    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
     <link rel="stylesheet" href="/styles.css">
 </head>
-<body class="bg-gray-100">
-    <!-- Hamburger Menu -->
-    <div class="fixed top-0 left-0 z-50">
-        <button id="menuButton" class="p-4 focus:outline-none">
-            <span class="material-icons text-gray-600">menu</span>
+<body class="light">
+    <!-- Header -->
+    <header class="app-header">
+        <button id="menuButton">
+            <span class="material-icons">menu</span>
         </button>
+        <h1 class="app-title">FDA Inspection Tool</h1>
         
         <!-- Menu Panel -->
-        <div id="menuPanel" class="hidden fixed left-0 top-0 h-full w-64 bg-white shadow-lg transform -translate-x-full transition-transform duration-300">
-            <div class="p-4 border-b">
-                <h2 class="text-xl font-semibold">FDA Inspection</h2>
-            </div>
-            <nav class="p-4">
+        <div id="menuPanel">
+            <nav>
                 <a href="#" class="menu-item" data-view="precheck">Site Precheck</a>
                 <a href="#" class="menu-item" data-view="inspection">Inspection Tool</a>
             </nav>
         </div>
-    </div>
+    </header>
 
     <!-- Main Content -->
-    <main class="container mx-auto px-4 pt-16">
+    <main class="container">
         <!-- Site Precheck View -->
-        <div id="precheckView" class="hidden">
-            <div class="mb-4">
+        <div id="precheckView" style="display: none;">
+            <div style="margin-bottom: 16px;">
                 <select id="coordinates" 
-                        class="w-full p-2 border rounded shadow-sm bg-white cursor-pointer"
                         data-coordinates='[
                             {"name": "American Foods Group, LLC - Long Prairie Packing Co", "address": "10 Riverside Dr, Long Prairie, MN 56347", "lat": 45.9735, "lon": -94.8676},
                             {"name": "Oscar Mayers Packing", "address": "2099 Roth St, Madison, WI 53704", "lat": 43.1166, "lon": -89.3471},
@@ -47,68 +43,68 @@
                     <option value="2850 MN-60, Windom, MN 56101">HyLife Foods</option>
                 </select>
             </div>
-            <div id="map" class="w-full h-96 rounded-lg shadow-lg mb-4"></div>
-            <div id="precheckOutput" class="bg-white p-4 rounded-lg shadow">
-                <h3 class="text-lg font-semibold mb-2">Analysis</h3>
-                <p id="precheckResult" class="text-gray-700">Enter coordinates to analyze the location.</p>
+            <div id="map" style="height: 400px; margin-bottom: 16px;"></div>
+            <div id="precheckOutput" class="card">
+                <h3>Analysis</h3>
+                <p id="precheckResult">Enter coordinates to analyze the location.</p>
             </div>
         </div>
 
         <!-- Inspection Tool View -->
-        <div id="inspectionView" class="hidden">
-            <div class="relative" style="z-index: 0;">
+        <div id="inspectionView" style="display: none;">
+            <div class="camera-container" style="position: relative; margin-bottom: 24px;">
                 <!-- Camera and preview container -->
-                <div class="relative h-64 bg-black rounded-lg mb-4">
-                    <video id="camera" class="w-full h-full object-cover" autoplay playsinline></video>
+                <div style="height: 300px;">
+                    <video id="camera" autoplay playsinline></video>
                 </div>
                 <!-- Controls container -->
-                <div class="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 p-4 controls-container" style="z-index: 20;">
-                    <div class="flex justify-between">
+                <div class="controls-container" style="position: absolute; bottom: 0; left: 0; right: 0;">
+                    <div style="display: flex; justify-content: space-between;">
                         <!-- Left side buttons -->
-                        <div class="flex gap-2">
-                            <button id="cameraToggle" class="bg-blue-500 text-white px-4 py-2 rounded-lg shadow flex items-center">
-                                <span class="material-icons mr-2">videocam</span>
+                        <div style="display: flex; gap: 8px;">
+                            <button id="cameraToggle" class="control-button">
+                                <span class="material-icons">videocam</span>
                                 <span>Camera</span>
                             </button>
-                            <button id="captureButton" class="bg-red-500 text-white px-4 py-2 rounded-lg shadow flex items-center">
-                                <span class="material-icons mr-2">photo_camera</span>
+                            <button id="captureButton" class="control-button">
+                                <span class="material-icons">photo_camera</span>
                                 <span>Capture</span>
                             </button>
                         </div>
                         <!-- Right side buttons -->
-                        <div class="flex gap-2">
-                            <button id="retakeButton" class="bg-yellow-500 text-white px-4 py-2 rounded-lg shadow flex items-center" style="display: none;">
-                                <span class="material-icons mr-2">refresh</span>
+                        <div style="display: flex; gap: 8px;">
+                            <button id="retakeButton" class="control-button" style="display: none;">
+                                <span class="material-icons">refresh</span>
                                 <span>Retake</span>
                             </button>
-                            <label class="bg-green-500 text-white px-4 py-2 rounded-lg shadow cursor-pointer flex items-center">
-                                <span class="material-icons mr-2">upload</span>
+                            <label class="control-button upload-button" style="cursor: pointer;">
+                                <span class="material-icons">upload</span>
                                 <span>Upload</span>
-                                <input type="file" id="fileInput" accept="image/*" class="hidden">
+                                <input type="file" id="fileInput" accept="image/*" style="display: none;">
                             </label>
                         </div>
                     </div>
                 </div>
             </div>
 
-            <div class="mb-4">
-                <div id="questionBox" class="bg-white p-4 rounded-lg shadow mb-4">
-                    <p class="text-lg">What is the background of this inspection?</p>
+            <div style="margin-bottom: 16px;">
+                <div id="questionBox" class="card" style="margin-bottom: 16px;">
+                    <p style="font-size: 1.1rem;">What is the background of this inspection?</p>
                 </div>
-                <div class="flex gap-2 mb-4">
-                    <button id="micButton" class="bg-blue-500 text-white p-2 rounded-lg shadow">
+                <div style="display: flex; gap: 8px; margin-bottom: 16px;">
+                    <button id="micButton">
                         <span class="material-icons">mic</span>
                     </button>
                     <input type="text" id="inspectionInput" 
-                           class="flex-1 p-2 border rounded shadow-sm" 
+                           style="flex: 1;" 
                            placeholder="Type or speak your response">
                 </div>
-                <button id="processButton" class="w-full bg-green-500 text-white py-2 rounded-lg shadow">
+                <button id="processButton">
                     Process
                 </button>
             </div>
 
-            <div id="citationResults" class="space-y-4">
+            <div id="citationResults">
                 <!-- Citations will be dynamically added here -->
             </div>
         </div>

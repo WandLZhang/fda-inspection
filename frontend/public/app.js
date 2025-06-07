@@ -362,13 +362,13 @@ async function loadSatelliteImage(address) {
         
         // Display satellite image
         mapContainer.innerHTML = `
-            <img src="${mapImage}" alt="Satellite view" class="w-full h-full object-cover rounded-lg">
+            <img src="${mapImage}" alt="Satellite view" style="width: 100%; height: 100%; object-fit: cover;">
         `;
         
         return { mapImage, locationDetails };
     } catch (err) {
         console.error('Error loading satellite image:', err);
-        mapContainer.innerHTML = '<div class="p-4 text-red-600">Error loading satellite image</div>';
+        mapContainer.innerHTML = '<div style="padding: 16px; color: var(--error);">Error loading satellite image</div>';
         throw err;
     }
 }
@@ -465,25 +465,25 @@ async function analyzeLocation(address) {
         
         // Show initial location info while analysis runs
         resultElement.innerHTML = `
-            <div class="mb-2">
-                <span class="font-semibold">Location:</span>
-                <div class="text-sm font-bold">${locationDetails.name}</div>
-                <div class="text-sm">${locationDetails.address}</div>
-                <div class="text-sm text-gray-600">Coordinates: ${locationDetails.lat}, ${locationDetails.lon}</div>
+            <div style="margin-bottom: 8px;">
+                <span style="font-weight: 600;">Location:</span>
+                <div style="font-size: 0.875rem; font-weight: 600;">${locationDetails.name}</div>
+                <div style="font-size: 0.875rem;">${locationDetails.address}</div>
+                <div style="font-size: 0.875rem; color: var(--on-surface-variant);">Coordinates: ${locationDetails.lat}, ${locationDetails.lon}</div>
             </div>
-            <div class="animate-pulse mt-4">
-                <div class="text-sm">Analyzing site activity...</div>
+            <div style="margin-top: 16px;">
+                <div style="font-size: 0.875rem;">Analyzing site activity...</div>
             </div>
         `;
         
         // Initialize streaming output
         resultElement.innerHTML = `
-            <div class="mb-2">
-                <span class="font-semibold">Location:</span>
-                <div class="text-sm font-bold">${locationDetails.name}</div>
-                <div class="text-sm">${locationDetails.address}</div>
+            <div style="margin-bottom: 8px;">
+                <span style="font-weight: 600;">Location:</span>
+                <div style="font-size: 0.875rem; font-weight: 600;">${locationDetails.name}</div>
+                <div style="font-size: 0.875rem;">${locationDetails.address}</div>
             </div>
-            <div id="streamingOutput" class="mb-4 p-4 bg-blue-50 border-l-4 border-blue-500 text-blue-700">
+            <div id="streamingOutput">
                 Starting analysis...
             </div>
         `;
@@ -550,7 +550,7 @@ async function analyzeLocation(address) {
         
         // Update map with annotated image
         mapContainer.innerHTML = `
-            <img src="${analysisResult.annotated_image}" alt="Analyzed satellite view" class="w-full h-full object-cover rounded-lg">
+            <img src="${analysisResult.annotated_image}" alt="Analyzed satellite view" style="width: 100%; height: 100%; object-fit: cover;">
         `;
 
         // Update streaming output with final results
@@ -573,12 +573,12 @@ async function analyzeLocation(address) {
         await new Promise(resolve => setTimeout(resolve, 500));
 
         const finalResults = `
-            <div class="mt-4">
-                <div class="font-bold mb-2">Activity Level: ${activityLabel}</div>
-                <div class="mb-4">${activityDescription}</div>
-                <div class="mt-4 text-gray-600">
+            <div style="margin-top: 16px;">
+                <div style="font-weight: 600; margin-bottom: 8px;">Activity Level: ${activityLabel}</div>
+                <div style="margin-bottom: 16px;">${activityDescription}</div>
+                <div style="margin-top: 16px; color: var(--on-surface-variant);">
                 ${observations.map(obs => `
-                    <div class="mt-2">• ${obs}</div>
+                    <div style="margin-top: 8px;">• ${obs}</div>
                 `).join('')}
                 </div>
             </div>
@@ -586,7 +586,7 @@ async function analyzeLocation(address) {
         
         // Update with final results
         streamingOutput.innerHTML = `
-            <div class="text-sm text-blue-600 mb-2">Analysis complete</div>
+            <div style="font-size: 0.875rem; color: var(--primary); margin-bottom: 8px;">Analysis complete</div>
             ${finalResults}
         `;
 
@@ -599,7 +599,7 @@ async function analyzeLocation(address) {
         } else {
             console.error('Error analyzing location:', error);
             resultElement.innerHTML = `
-                <div class="p-4 text-red-600">
+                <div style="padding: 16px; color: var(--error);">
                     Error: ${error.message}
                 </div>
             `;
@@ -612,12 +612,8 @@ async function analyzeLocation(address) {
     }
 }
 
-// Menu Toggle
-menuButton.addEventListener('click', () => {
-    isMenuOpen = !isMenuOpen;
-    menuPanel.classList.toggle('hidden');
-    menuPanel.classList.toggle('visible');
-});
+// Menu is now hover-based, so we don't need click toggle
+// Keep the button for visual consistency but no click handler needed
 
 // View Switching
 menuItems.forEach(item => {
@@ -625,9 +621,6 @@ menuItems.forEach(item => {
         e.preventDefault();
         const view = e.target.dataset.view;
         switchView(view);
-        isMenuOpen = false;
-        menuPanel.classList.add('hidden');
-        menuPanel.classList.remove('visible');
     });
 });
 
@@ -638,17 +631,17 @@ function switchView(view) {
     audioManager.stopAudio();
     
     // Hide all views
-    precheckView.classList.add('hidden');
-    inspectionView.classList.add('hidden');
+    precheckView.style.display = 'none';
+    inspectionView.style.display = 'none';
     
     // Show selected view
     if (view === 'precheck') {
-        precheckView.classList.remove('hidden');
+        precheckView.style.display = 'block';
         initMap();
     } else if (view === 'inspection') {
-        inspectionView.classList.remove('hidden');
+        inspectionView.style.display = 'block';
         // Initialize inspection view buttons
-        captureButton.style.display = 'flex';
+        captureButton.style.display = 'inline-flex';
         retakeButton.style.display = 'none';
         // Clear any existing preview or results
         const preview = document.getElementById('preview');
@@ -677,8 +670,6 @@ async function toggleCamera() {
             camera.srcObject = mediaStream;
             isCameraOn = true;
             cameraToggle.querySelector('.material-icons').textContent = 'videocam';
-            cameraToggle.classList.remove('bg-blue-500');
-            cameraToggle.classList.add('bg-red-500');
         } catch (err) {
             console.error('Error accessing camera:', err);
             alert('Unable to access camera. Please ensure you have granted camera permissions.');
@@ -690,8 +681,6 @@ async function toggleCamera() {
         }
         isCameraOn = false;
         cameraToggle.querySelector('.material-icons').textContent = 'videocam_off';
-        cameraToggle.classList.remove('bg-red-500');
-        cameraToggle.classList.add('bg-blue-500');
     }
 }
 
@@ -765,8 +754,7 @@ function showPreview(imageData) {
     // Show preview
     const preview = document.createElement('img');
     preview.src = imageData;
-    preview.className = 'absolute inset-0 w-full h-full object-contain bg-black';
-    preview.style.zIndex = '10';
+    preview.style.cssText = 'position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background-color: black; z-index: 10;';
     preview.id = 'preview';
     
     // Remove any existing preview
@@ -834,7 +822,7 @@ async function processInspection() {
 
         // Clear previous results and show status container
         citationResults.innerHTML = `
-            <div id="inspectionStatus" class="mb-4 p-4 bg-blue-50 border-l-4 border-blue-500 text-blue-700">
+            <div id="inspectionStatus" style="margin-bottom: 16px;">
                 <div class="streaming-loading">
                     <span>Starting inspection...</span>
                     <div class="loading-dots">
@@ -842,7 +830,7 @@ async function processInspection() {
                     </div>
                 </div>
             </div>
-            <div id="preliminaryCitations" class="hidden"></div>
+            <div id="preliminaryCitations" style="display: none;"></div>
             <div id="verifiedCitations"></div>
         `;
 
@@ -912,15 +900,15 @@ async function processInspection() {
                         `;
                         // Show preliminary citations
                         preliminaryCitationsElement.innerHTML = `
-                            <h3 class="text-lg font-semibold mb-2">Preliminary Findings:</h3>
+                            <h3 style="font-size: 1.125rem; font-weight: 600; margin-bottom: 8px;">Preliminary Findings:</h3>
                             ${preliminaryCitations.map((citation, idx) => `
-                                <div class="mb-2 p-2 bg-gray-100 rounded">
-                                    <span class="font-semibold">Violation ${idx + 1}:</span> Section ${citation.section}
-                                    <div class="text-sm text-gray-600">${citation.reason.substring(0, 100)}...</div>
+                                <div class="card" style="margin-bottom: 8px; padding: 8px;">
+                                    <span style="font-weight: 600;">Violation ${idx + 1}:</span> Section ${citation.section}
+                                    <div style="font-size: 0.875rem; color: var(--on-surface-variant);">${citation.reason.substring(0, 100)}...</div>
                                 </div>
                             `).join('')}
                         `;
-                        preliminaryCitationsElement.classList.remove('hidden');
+                        preliminaryCitationsElement.style.display = 'block';
                         break;
                         
                     case 'VERIFICATION_PROCESS_START':
@@ -987,12 +975,12 @@ async function processInspection() {
                         // Final update with complete data
                         analysisStream.close();
                         statusElement.innerHTML = `
-                            <div class="text-green-600">
+                            <div style="color: var(--tertiary);">
                                 ✓ Analysis complete
                             </div>
                         `;
                         // Hide preliminary citations
-                        preliminaryCitationsElement.classList.add('hidden');
+                        preliminaryCitationsElement.style.display = 'none';
                         // Display final results
                         displayCitations(data.data.citations, data.data.summary);
                         break;
@@ -1048,11 +1036,11 @@ async function processInspection() {
         console.error('Error processing inspection:', err);
         const statusElement = document.getElementById('inspectionStatus');
         if (statusElement) {
-            statusElement.innerHTML = `
-                <div class="text-red-600">
-                    An error occurred while processing the inspection: ${err.message}
-                </div>
-            `;
+                statusElement.innerHTML = `
+                    <div style="color: var(--error);">
+                        An error occurred while processing the inspection: ${err.message}
+                    </div>
+                `;
         }
     } finally {
         processButton.disabled = false;
@@ -1065,17 +1053,17 @@ function displayVerifiedCitations(citations, container) {
     container.innerHTML = '';
     citations.forEach(citation => {
         const card = document.createElement('div');
-        card.className = 'citation-card mb-4 p-4 border border-gray-300 rounded-lg';
+        card.className = 'citation-card';
         card.innerHTML = `
-            <img src="${citation.image}" alt="Citation evidence" class="w-full h-auto mb-3 rounded">
-            <h3 class="text-lg font-semibold mb-2"><a href="${citation.url}" target="_blank" class="text-blue-600 hover:text-blue-800">Section ${citation.section}</a></h3>
-            <div class="mb-3">
-                <h4 class="font-semibold text-gray-700">Regulation:</h4>
-                <p class="text-gray-600">${citation.text}</p>
+            <img src="${citation.image}" alt="Citation evidence" style="width: 100%; height: auto; margin-bottom: 12px;">
+            <h3><a href="${citation.url}" target="_blank">Section ${citation.section}</a></h3>
+            <div style="margin-bottom: 12px;">
+                <h4>Regulation:</h4>
+                <p>${citation.text}</p>
             </div>
             <div>
-                <h4 class="font-semibold text-gray-700">Reason:</h4>
-                <p class="text-gray-800">${citation.reason}</p>
+                <h4>Reason:</h4>
+                <p>${citation.reason}</p>
             </div>
         `;
         container.appendChild(card);
@@ -1090,7 +1078,7 @@ function displayCitations(citations, summary) {
     const summaryContainer = document.createElement('div');
     summaryContainer.className = 'summary-container';
     summaryContainer.innerHTML = `
-        <div id="streamingOutput" class="mb-4 p-4 bg-blue-50 border-l-4 border-blue-500 text-blue-700">
+        <div id="streamingOutput">
             ${summary || 'No summary available for these citations.'}
         </div>
     `;
@@ -1102,17 +1090,17 @@ function displayCitations(citations, summary) {
     // Add individual citation cards
     citations.forEach(citation => {
         const card = document.createElement('div');
-        card.className = 'citation-card mb-4 p-4 border border-gray-300 rounded-lg';
+        card.className = 'citation-card';
         card.innerHTML = `
-            <img src="${citation.image}" alt="Citation evidence" class="w-full h-auto mb-3 rounded">
-            <h3 class="text-lg font-semibold mb-2"><a href="${citation.url}" target="_blank" class="text-blue-600 hover:text-blue-800">Section ${citation.section}</a></h3>
-            <div class="mb-3">
-                <h4 class="font-semibold text-gray-700">Regulation:</h4>
-                <p class="text-gray-600">${citation.text}</p>
+            <img src="${citation.image}" alt="Citation evidence" style="width: 100%; height: auto; margin-bottom: 12px;">
+            <h3><a href="${citation.url}" target="_blank">Section ${citation.section}</a></h3>
+            <div style="margin-bottom: 12px;">
+                <h4>Regulation:</h4>
+                <p>${citation.text}</p>
             </div>
             <div>
-                <h4 class="font-semibold text-gray-700">Reason:</h4>
-                <p class="text-gray-800">${citation.reason}</p>
+                <h4>Reason:</h4>
+                <p>${citation.reason}</p>
             </div>
         `;
         citationResults.appendChild(card);
@@ -1155,7 +1143,7 @@ window.addEventListener('error', (event) => {
         const resultElement = document.getElementById('precheckResult');
         if (resultElement) {
             resultElement.innerHTML = `
-                <div class="p-4 text-red-600">
+                <div style="padding: 16px; color: var(--error);">
                     Error initializing application. Please try refreshing the page.
                 </div>
             `;
