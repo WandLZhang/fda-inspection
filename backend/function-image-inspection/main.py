@@ -405,6 +405,7 @@ def verify_and_complete_response(initial_response, img):
             end = response_text.rfind('}') + 1
             if start != -1 and end != -1:
                 json_str = response_text[start:end]
+                logger.info(f"Raw verification JSON string for citation {index + 1}: {json_str}")
                 verified_citation = json.loads(json_str)
                 print(f"Parsed verification response for citation {index + 1}")
                 if verified_citation:
@@ -414,6 +415,9 @@ def verify_and_complete_response(initial_response, img):
                     # Convert to RGB mode if needed
                     if pil_img.mode in ('RGBA', 'LA', 'P'):
                         pil_img = pil_img.convert('RGB')
+                    
+                    # Log citation data before plotting bounding box
+                    logger.info(f"Data for citation {index + 1} (from initial_response) being used for bounding box: {citation}")
                     
                     # Plot bounding box and get base64 image
                     image_base64 = plot_bounding_box(pil_img.copy(), citation, verified_citation['section'], index)
