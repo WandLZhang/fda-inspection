@@ -100,7 +100,7 @@ def generate_gemini_audio(text: str) -> bytes | None:
         client = genai.Client(
             api_key=os.environ.get("GEMINI_API_KEY"),
         )
-        logger.info(f"[PERF] Gemini client initialization: {time.time() - client_init_start:.4f}s")
+        print(f"[PERF] Gemini client initialization: {time.time() - client_init_start:.4f}s")
 
         model = "gemini-2.5-flash-preview-tts"
         
@@ -156,9 +156,9 @@ def generate_gemini_audio(text: str) -> bytes | None:
                 # Get mime type from first chunk
                 if mime_type is None:
                     mime_type = inline_data.mime_type
-                    logger.info(f"Audio mime type: {mime_type}")
+                    print(f"Audio mime type: {mime_type}")
 
-        logger.info(f"[PERF] Audio streaming complete: {time.time() - stream_start_time:.4f}s, chunks received: {chunk_count}")
+        print(f"[PERF] Audio streaming complete: {time.time() - stream_start_time:.4f}s, chunks received: {chunk_count}")
         
         if not audio_chunks:
             logger.error("No audio data generated")
@@ -167,17 +167,17 @@ def generate_gemini_audio(text: str) -> bytes | None:
         # Concatenate all audio chunks
         concat_start_time = time.time()
         audio_data = b"".join(audio_chunks)
-        logger.info(f"[PERF] Audio chunk concatenation: {time.time() - concat_start_time:.4f}s, total size: {len(audio_data)} bytes")
+        print(f"[PERF] Audio chunk concatenation: {time.time() - concat_start_time:.4f}s, total size: {len(audio_data)} bytes")
         
         # Convert to WAV if necessary
         file_extension = mimetypes.guess_extension(mime_type)
         if file_extension is None or file_extension != ".wav":
-            logger.info("Converting audio to WAV format")
+            print("Converting audio to WAV format")
             conversion_start_time = time.time()
             audio_data = convert_to_wav(audio_data, mime_type)
-            logger.info(f"[PERF] WAV conversion: {time.time() - conversion_start_time:.4f}s")
+            print(f"[PERF] WAV conversion: {time.time() - conversion_start_time:.4f}s")
         
-        logger.info(f"[PERF] Total generate_gemini_audio time: {time.time() - start_time:.4f}s")
+        print(f"[PERF] Total generate_gemini_audio time: {time.time() - start_time:.4f}s")
         return audio_data
         
     except Exception as e:
@@ -210,12 +210,12 @@ def fda_generate_audio(request):
             return (jsonify({'error': 'Text is required'}), 400, headers)
 
         text = request_json['text']
-        logger.info(f"Generating audio for text: {text[:50]}... (length: {len(text)} chars)")
+        print(f"Generating audio for text: {text[:50]}... (length: {len(text)} chars)")
         
         # Generate audio
         audio_gen_start = time.time()
         audio_data = generate_gemini_audio(text)
-        logger.info(f"[PERF] Audio generation call: {time.time() - audio_gen_start:.4f}s")
+        print(f"[PERF] Audio generation call: {time.time() - audio_gen_start:.4f}s")
         
         if not audio_data:
             return (jsonify({'error': 'Failed to generate audio'}), 500, headers)
@@ -223,9 +223,9 @@ def fda_generate_audio(request):
         # Convert to base64
         b64_start_time = time.time()
         audio_content_base64 = base64.b64encode(audio_data).decode('utf-8')
-        logger.info(f"[PERF] Base64 encoding: {time.time() - b64_start_time:.4f}s, encoded size: {len(audio_content_base64)} chars")
+        print(f"[PERF] Base64 encoding: {time.time() - b64_start_time:.4f}s, encoded size: {len(audio_content_base64)} chars")
         
-        logger.info(f"[PERF] Total request handling time: {time.time() - overall_start_time:.4f}s")
+        print(f"[PERF] Total request handling time: {time.time() - overall_start_time:.4f}s")
         
         return (jsonify({
             'audio': audio_content_base64  # Base64 encoded audio content
