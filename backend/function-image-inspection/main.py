@@ -31,6 +31,15 @@ class StreamLogger(logging.Logger):
     def _log(self, level, msg, args, exc_info=None, extra=None, stack_info=False):
         super()._log(level, msg, args, exc_info, extra, stack_info)
         self.queue.put(json.dumps({"type": "status", "content": msg % args}))
+    
+    def stream_event(self, event_type, content=None, data=None):
+        """Send a structured event to the stream"""
+        event = {"type": event_type}
+        if content:
+            event["content"] = content
+        if data:
+            event["data"] = data
+        self.queue.put(json.dumps(event))
 
 stream_logger = StreamLogger('stream_logger')
 
@@ -219,7 +228,7 @@ def plot_bounding_box(img, citation, verified_section, index):
 
 def generate_initial_response(inspection_type, image_data):
     print(f"Starting generate_initial_response for {inspection_type}")
-    stream_logger.info("Initializing image analysis...")
+    stream_logger.stream_event("INITIAL_ANALYSIS_START", "Initializing image analysis with AI...")
     text_prompt = f"""As an FDA inspector performing a {inspection_type} inspection, analyze the given image.
     Based on Title 21 regulations, identify potential citation opportunities and reference 
     the specific sections of Title 21 that apply. Provide a detailed explanation for each 
@@ -252,7 +261,7 @@ def generate_initial_response(inspection_type, image_data):
     ]
 
     print(f"Sending request to Gemini model with prompt length: {len(text_prompt)}")
-    stream_logger.info("Processing visual elements...")
+    stream_logger.stream_event("INITIAL_ANALYSIS_PROCESSING", "AI is processing visual elements and identifying potential violations...")
     
     # Generate content with streaming
     response_text = ""
@@ -276,7 +285,6 @@ If an object is present multiple times, name them according to their unique char
             response_text += chunk.text
     
     print(f"Received response from Gemini model with length: {len(response_text)}")
-    stream_logger.info("Identifying potential violations...")
 
     try:
         response_text = response_text.strip()
@@ -286,6 +294,14 @@ If an object is present multiple times, name them according to their unique char
             json_str = response_text[start:end]
             parsed_response = json.loads(json_str)
             print(f"Parsed JSON response with {len(parsed_response['citations'])} citations")
+            
+            # Stream the initial citations found
+            stream_logger.stream_event(
+                "INITIAL_CITATIONS_IDENTIFIED", 
+                "Initial potential violations identified.",
+                {"citations": parsed_response.get('citations', [])}
+            )
+            
             return parsed_response
         else:
             raise ValueError("No valid JSON object found in the response")
@@ -297,16 +313,41 @@ def strip_image_from_citations(citations):
     return [{k: v for k, v in citation.items() if k != 'image'} for citation in citations]
 
 def verify_and_complete_response(initial_response, img):
-    print(f"Starting verify_and_complete_response with {len(initial_response.get('citations', []))} citations")
-    stream_logger.info("Cross-referencing FDA regulations...")
+    citations_count = len(initial_response.get('citations', []))
+    print(f"Starting verify_and_complete_response with {citations_count} citations")
+    
+    stream_logger.stream_event(
+        "VERIFICATION_PROCESS_START",
+        "Starting verification and cross-referencing of identified violations with FDA regulations.",
+        {"citation_count": citations_count}
+    )
+    
     verified_citations = []
+    total_citations = len(initial_response.get('citations', []))
     for index, citation in enumerate(initial_response.get('citations', [])):
         print(f"Processing citation {index + 1}")
+        
+        stream_logger.stream_event(
+            "CITATION_VERIFICATION_START",
+            f"Verifying violation {index + 1} of {total_citations}...",
+            {"citation_index": index, "total_citations": total_citations}
+        )
+        
+        stream_logger.stream_event(
+            "CITATION_CODE_LOOKUP",
+            f"Retrieving relevant FDA regulations for violation {index + 1}...",
+            {"citation_index": index}
+        )
+        
         relevant_codes = get_relevant_codes(citation['reason'], DATA_STORE_ID)
         print(f"Retrieved relevant codes with length: {len(relevant_codes)}")
         
         print(f"Generating verification prompt for citation {index + 1}")
-        stream_logger.info(f"Validating citation {index + 1}...")
+        stream_logger.stream_event(
+            "CITATION_AI_VERIFICATION",
+            f"Cross-referencing violation {index + 1} with AI and FDA data...",
+            {"citation_index": index}
+        )
         verification_prompt = f"""Given the following citation and other relevant codes retrieved from the FDA Title 21 regulations, 
         decide which is better and more relevant for the given citation "reason": the original cited section OR another section from the retrieved relevant codes. Use chain of thought. If there is a better section code from the retrieved relevant codes, replace the original cited "section" and "text" fields with the better option from the retrieved relevant codes. 
         Then, generate a valid URL for the (corrected) section.
@@ -378,6 +419,16 @@ def verify_and_complete_response(initial_response, img):
                     image_base64 = plot_bounding_box(pil_img.copy(), citation, verified_citation['section'], index)
                     verified_citation['image'] = f"data:image/jpeg;base64,{image_base64}"
                     verified_citations.append(verified_citation)
+                    
+                    # Stream the processed citation
+                    stream_logger.stream_event(
+                        "SINGLE_CITATION_PROCESSED",
+                        f"Violation {index + 1} processed and image generated.",
+                        {
+                            "citation_index": index,
+                            "processed_citation": verified_citation
+                        }
+                    )
             else:
                 logger.error("No valid JSON found in verification response")
         except Exception as e:
@@ -398,7 +449,10 @@ def verify_and_complete_response(initial_response, img):
         print(f"Total length of verified_citations JSON (without images): {len(citations_json_without_images)}")
 
         print("Generating summary")
-        stream_logger.info("Generating inspection report...")
+        stream_logger.stream_event(
+            "SUMMARY_GENERATION_START",
+            "All violations processed. Generating final inspection summary..."
+        )
         summary_prompt = f"""Generate a brief summary of the following FDA citations in 2-3 sentences. Focus on the key issues identified and their potential impact on food safety or compliance.
 
         Citations:
@@ -425,42 +479,50 @@ def verify_and_complete_response(initial_response, img):
             if chunk.text:
                 summary_text += chunk.text
         print(f"Generated summary with length: {len(summary_text)}")
-        stream_logger.info("Finalizing analysis...")
-
-        return {
+        
+        stream_logger.stream_event(
+            "SUMMARY_GENERATED",
+            "Inspection summary generated.",
+            {"summary": summary_text.strip()}
+        )
+        
+        stream_logger.stream_event(
+            "ANALYSIS_FINALIZING",
+            "Finalizing analysis..."
+        )
+        
+        final_response = {
             "citations": verified_citations,
             "summary": summary_text.strip()
         }
+        
+        stream_logger.stream_event(
+            "ANALYSIS_COMPLETE",
+            "Image inspection complete.",
+            final_response
+        )
+        
+        return final_response
     
     return {"citations": verified_citations, "summary": ""}
 
 def generate_status_stream():
     """Generate status stream from StreamLogger queue"""
+    print("generate_status_stream called - stream endpoint is active")
     while True:
         try:
             message = stream_logger.queue.get(timeout=1)
+            print(f"Streaming message: {message}")
             yield f"data: {message}\n\n"
         except queue.Empty:
             yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
 
-def generate_status_stream():
-    """Generate status stream for inspection process"""
-    messages = [
-        "Initializing image analysis...",
-        "Processing visual elements...",
-        "Identifying potential violations...",
-        "Cross-referencing FDA regulations...",
-        "Validating citations...",
-        "Generating inspection report...",
-        "Finalizing analysis..."
-    ]
-    for msg in messages:
-        yield f"data: {json.dumps({'type': 'status', 'content': msg})}\n\n"
-        time.sleep(7)  # Simulate processing time
-
 @functions_framework.http
 def process_inspection(request):
     print("Starting process_inspection")
+    print(f"Request method: {request.method}")
+    print(f"Request path: {request.path}")
+    
     # Enable CORS
     headers = {
         'Access-Control-Allow-Origin': '*',
@@ -470,10 +532,12 @@ def process_inspection(request):
     }
 
     if request.method == 'OPTIONS':
+        print("Handling OPTIONS request")
         return ('', 204, headers)
 
     # Handle streaming endpoint
     if request.method == 'GET' and request.path.endswith('/stream'):
+        print("Handling GET /stream request")
         headers['Content-Type'] = 'text/event-stream'
         headers['Cache-Control'] = 'no-cache'
         headers['Connection'] = 'keep-alive'
@@ -483,33 +547,60 @@ def process_inspection(request):
 
     # Handle regular POST request for image analysis
     if request.method == 'POST':
+        print("Handling POST request")
         headers['Content-Type'] = 'application/json'
         try:
+            print("About to get JSON data from request")
             request_json = request.get_json()
+            print(f"Got JSON data: {bool(request_json)}")
+            
             if not request_json:
+                print("No JSON data received")
                 return jsonify({'error': 'No JSON data received'}), 400, headers
 
+            print("Extracting image and background data")
             image_data = request_json.get('image', '').split(',')[1]  # Remove data URL prefix
             inspection_type = request_json.get('background', '')
+            print(f"Image data length: {len(image_data) if image_data else 0}")
+            print(f"Inspection type: {inspection_type}")
 
             if not image_data or not inspection_type:
+                print("Missing required fields")
                 return jsonify({'error': 'Missing required fields'}), 400, headers
 
+            # Stream that analysis has started
+            print("About to send ANALYSIS_STARTED event")
+            stream_logger.stream_event(
+                "ANALYSIS_STARTED",
+                "Image inspection process initiated.",
+                {"inspection_type": inspection_type}
+            )
+            print("ANALYSIS_STARTED event sent")
+
             # Generate initial response
+            print("About to call generate_initial_response")
             initial_response = generate_initial_response(inspection_type, image_data)
+            print(f"generate_initial_response returned: {bool(initial_response)}")
+            
             if 'error' in initial_response:
+                print(f"Error in initial response: {initial_response['error']}")
                 return jsonify(initial_response), 500, headers
 
             # Verify and complete response
+            print("About to call verify_and_complete_response")
             verified_response = verify_and_complete_response(initial_response, image_data)
+            print(f"verify_and_complete_response returned: {bool(verified_response)}")
 
+            print("Returning final response")
             return jsonify(verified_response), 200, headers
 
         except Exception as e:
+            print(f"Exception caught: {str(e)}")
             logger.error(f"Error processing request: {str(e)}")
             return jsonify({"error": str(e)}), 500, headers
 
     # If not OPTIONS, GET /stream, or POST, return method not allowed
+    print("Method not allowed")
     return jsonify({"error": "Method not allowed"}), 405, headers
 
 if __name__ == "__main__":

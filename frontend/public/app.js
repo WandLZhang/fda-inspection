@@ -650,58 +650,26 @@ async function processInspection() {
         citationResults.innerHTML = `
             <div id="inspectionStatus" class="mb-4 p-4 bg-blue-50 border-l-4 border-blue-500 text-blue-700">
                 <div class="streaming-loading">
-                    <span>Initializing inspection...</span>
+                    <span>Starting inspection...</span>
                     <div class="loading-dots">
                         <span>.</span><span>.</span><span>.</span>
                     </div>
                 </div>
             </div>
+            <div id="preliminaryCitations" class="hidden"></div>
+            <div id="verifiedCitations"></div>
         `;
 
         const statusElement = document.getElementById('inspectionStatus');
+        const preliminaryCitationsElement = document.getElementById('preliminaryCitations');
+        const verifiedCitationsElement = document.getElementById('verifiedCitations');
+        
+        let preliminaryCitations = [];
+        let verifiedCitations = [];
+        let summary = '';
 
-        // Start streaming status updates
-        const streamUrl = 'https://us-central1-gemini-med-lit-review.cloudfunctions.net/process-inspection/stream';
-        const analysisStream = new EventSource(streamUrl);
-
-        // Wait for streaming to complete
-        await new Promise((resolve, reject) => {
-            analysisStream.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    if (data.type === 'status') {
-                        statusElement.innerHTML = `
-                            <div class="streaming-loading">
-                                <span>${data.content}</span>
-                                <div class="loading-dots">
-                                    <span>.</span><span>.</span><span>.</span>
-                                </div>
-                            </div>
-                        `;
-                        
-                        if (data.content.includes('Finalizing analysis')) {
-                            analysisStream.close();
-                            resolve();
-                        }
-                    } else if (data.type === 'log') {
-                        console.log('Inspection log:', data.content);
-                    }
-                } catch (error) {
-                    console.error('Error parsing stream data:', error);
-                    analysisStream.close();
-                    reject(error);
-                }
-            };
-
-            analysisStream.onerror = (error) => {
-                console.error('Stream error:', error);
-                analysisStream.close();
-                reject(new Error('Stream connection failed'));
-            };
-        });
-
-        // Send the processing request
-        const response = await fetch('https://us-central1-gemini-med-lit-review.cloudfunctions.net/process-inspection', {
+        // Send the POST request first to start the analysis
+        const postPromise = fetch('https://us-central1-gemini-med-lit-review.cloudfunctions.net/process-inspection', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
@@ -712,14 +680,179 @@ async function processInspection() {
             })
         });
 
+        // Start streaming status updates simultaneously
+        const streamUrl = 'https://us-central1-gemini-med-lit-review.cloudfunctions.net/process-inspection/stream';
+        const analysisStream = new EventSource(streamUrl);
+
+        // Handle streaming events
+        analysisStream.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                console.log('Received stream event:', data.type, data);
+                
+                switch(data.type) {
+                    case 'ANALYSIS_STARTED':
+                        statusElement.innerHTML = `
+                            <div class="streaming-loading">
+                                <span>Image inspection process initiated...</span>
+                                <div class="loading-dots">
+                                    <span>.</span><span>.</span><span>.</span>
+                                </div>
+                            </div>
+                        `;
+                        break;
+                        
+                    case 'INITIAL_ANALYSIS_START':
+                    case 'INITIAL_ANALYSIS_PROCESSING':
+                        statusElement.innerHTML = `
+                            <div class="streaming-loading">
+                                <span>${data.content}</span>
+                                <div class="loading-dots">
+                                    <span>.</span><span>.</span><span>.</span>
+                                </div>
+                            </div>
+                        `;
+                        break;
+                        
+                    case 'INITIAL_CITATIONS_IDENTIFIED':
+                        preliminaryCitations = data.data.citations;
+                        statusElement.innerHTML = `
+                            <div class="streaming-loading">
+                                <span>Found ${preliminaryCitations.length} potential violations. Verifying...</span>
+                                <div class="loading-dots">
+                                    <span>.</span><span>.</span><span>.</span>
+                                </div>
+                            </div>
+                        `;
+                        // Show preliminary citations
+                        preliminaryCitationsElement.innerHTML = `
+                            <h3 class="text-lg font-semibold mb-2">Preliminary Findings:</h3>
+                            ${preliminaryCitations.map((citation, idx) => `
+                                <div class="mb-2 p-2 bg-gray-100 rounded">
+                                    <span class="font-semibold">Violation ${idx + 1}:</span> Section ${citation.section}
+                                    <div class="text-sm text-gray-600">${citation.reason.substring(0, 100)}...</div>
+                                </div>
+                            `).join('')}
+                        `;
+                        preliminaryCitationsElement.classList.remove('hidden');
+                        break;
+                        
+                    case 'VERIFICATION_PROCESS_START':
+                        statusElement.innerHTML = `
+                            <div class="streaming-loading">
+                                <span>Cross-referencing ${data.data.citation_count} violations with FDA regulations...</span>
+                                <div class="loading-dots">
+                                    <span>.</span><span>.</span><span>.</span>
+                                </div>
+                            </div>
+                        `;
+                        break;
+                        
+                    case 'CITATION_VERIFICATION_START':
+                    case 'CITATION_CODE_LOOKUP':
+                    case 'CITATION_AI_VERIFICATION':
+                        const citationNum = data.data.citation_index + 1;
+                        const totalCitations = data.data.total_citations || preliminaryCitations.length;
+                        statusElement.innerHTML = `
+                            <div class="streaming-loading">
+                                <span>${data.content || `Processing violation ${citationNum} of ${totalCitations}...`}</span>
+                                <div class="loading-dots">
+                                    <span>.</span><span>.</span><span>.</span>
+                                </div>
+                            </div>
+                        `;
+                        break;
+                        
+                    case 'SINGLE_CITATION_PROCESSED':
+                        verifiedCitations.push(data.data.processed_citation);
+                        // Update the verified citations display
+                        displayVerifiedCitations(verifiedCitations, verifiedCitationsElement);
+                        break;
+                        
+                    case 'SUMMARY_GENERATION_START':
+                        statusElement.innerHTML = `
+                            <div class="streaming-loading">
+                                <span>Generating inspection summary...</span>
+                                <div class="loading-dots">
+                                    <span>.</span><span>.</span><span>.</span>
+                                </div>
+                            </div>
+                        `;
+                        break;
+                        
+                    case 'SUMMARY_GENERATED':
+                        summary = data.data.summary;
+                        // Play the summary audio
+                        audioManager.playAudio(summary);
+                        break;
+                        
+                    case 'ANALYSIS_FINALIZING':
+                        statusElement.innerHTML = `
+                            <div class="streaming-loading">
+                                <span>Finalizing analysis...</span>
+                                <div class="loading-dots">
+                                    <span>.</span><span>.</span><span>.</span>
+                                </div>
+                            </div>
+                        `;
+                        break;
+                        
+                    case 'ANALYSIS_COMPLETE':
+                        // Final update with complete data
+                        analysisStream.close();
+                        statusElement.innerHTML = `
+                            <div class="text-green-600">
+                                ✓ Analysis complete
+                            </div>
+                        `;
+                        // Hide preliminary citations
+                        preliminaryCitationsElement.classList.add('hidden');
+                        // Display final results
+                        displayCitations(data.data.citations, data.data.summary);
+                        break;
+                        
+                    case 'status':
+                        // Fallback for any status messages
+                        statusElement.innerHTML = `
+                            <div class="streaming-loading">
+                                <span>${data.content}</span>
+                                <div class="loading-dots">
+                                    <span>.</span><span>.</span><span>.</span>
+                                </div>
+                            </div>
+                        `;
+                        break;
+                        
+                    case 'heartbeat':
+                        // Ignore heartbeat messages
+                        break;
+                        
+                    default:
+                        console.log('Unknown event type:', data.type);
+                }
+            } catch (error) {
+                console.error('Error parsing stream data:', error);
+            }
+        };
+
+        analysisStream.onerror = (error) => {
+            console.error('Stream error:', error);
+            analysisStream.close();
+        };
+
+        // Wait for the POST request to complete
+        const response = await postPromise;
+        
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
 
         const result = await response.json();
         
-        // Display the final results
-        displayCitations(result.citations, result.summary);
+        // If stream didn't provide complete results, use POST response
+        if (!verifiedCitations.length) {
+            displayCitations(result.citations, result.summary);
+        }
         
         // Keep retake button visible after processing
         retakeButton.style.display = 'flex';
@@ -727,9 +860,10 @@ async function processInspection() {
 
     } catch (err) {
         console.error('Error processing inspection:', err);
+        const statusElement = document.getElementById('inspectionStatus');
         if (statusElement) {
             statusElement.innerHTML = `
-                <div class="error-message">
+                <div class="text-red-600">
                     An error occurred while processing the inspection: ${err.message}
                 </div>
             `;
@@ -738,6 +872,28 @@ async function processInspection() {
         processButton.disabled = false;
         processButton.textContent = 'Process';
     }
+}
+
+// Display verified citations as they come in
+function displayVerifiedCitations(citations, container) {
+    container.innerHTML = '';
+    citations.forEach(citation => {
+        const card = document.createElement('div');
+        card.className = 'citation-card mb-4 p-4 border border-gray-300 rounded-lg';
+        card.innerHTML = `
+            <img src="${citation.image}" alt="Citation evidence" class="w-full h-auto mb-3 rounded">
+            <h3 class="text-lg font-semibold mb-2"><a href="${citation.url}" target="_blank" class="text-blue-600 hover:text-blue-800">Section ${citation.section}</a></h3>
+            <div class="mb-3">
+                <h4 class="font-semibold text-gray-700">Regulation:</h4>
+                <p class="text-gray-600">${citation.text}</p>
+            </div>
+            <div>
+                <h4 class="font-semibold text-gray-700">Reason:</h4>
+                <p class="text-gray-800">${citation.reason}</p>
+            </div>
+        `;
+        container.appendChild(card);
+    });
 }
 
 // Display Citations
