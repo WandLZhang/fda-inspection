@@ -76,6 +76,45 @@ class AudioManager {
 
 const audioManager = new AudioManager();
 
+async function resizeAndCompressImage(base64Str, maxWidth, maxHeight, quality) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.src = base64Str;
+        img.onload = () => {
+            let width = img.width;
+            let height = img.height;
+
+            if (width > height) {
+                if (width > maxWidth) {
+                    height = Math.round((height * maxWidth) / width);
+                    width = maxWidth;
+                }
+            } else {
+                if (height > maxHeight) {
+                    width = Math.round((width * maxHeight) / height);
+                    height = maxHeight;
+                }
+            }
+            
+            // Ensure width and height are at least 1px to avoid canvas errors
+            width = Math.max(1, width);
+            height = Math.max(1, height);
+
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, width, height);
+
+            resolve(canvas.toDataURL('image/jpeg', quality));
+        };
+        img.onerror = (error) => {
+            console.error("Image load error in resize function:", error);
+            reject(new Error("Failed to load image for resizing."));
+        };
+    });
+}
+
 // Initialize Speech Recognition
 if ('webkitSpeechRecognition' in window) {
     recognition = new webkitSpeechRecognition();
@@ -220,11 +259,16 @@ async function analyzeLocation(address) {
     const resultElement = document.getElementById('precheckResult');
     resultElement.textContent = 'Loading satellite image...';
 
+    // Create a local controller for this analysis
+    const localAbortController = new AbortController();
+
     // Cancel any ongoing analysis
     if (currentAnalysisController) {
         currentAnalysisController.abort();
     }
-    currentAnalysisController = new AbortController();
+    
+    // Set this as the current active controller
+    currentAnalysisController = localAbortController;
 
     // Stop any playing audio
     audioManager.stopAudio();
@@ -299,7 +343,17 @@ async function analyzeLocation(address) {
                 reject(new Error('Stream connection failed'));
             };
 
-            currentAnalysisController.signal.addEventListener('abort', () => {
+            // Debug logging to identify the null issue
+            console.log('Debug: localAbortController =', localAbortController);
+            console.log('Debug: type of localAbortController =', typeof localAbortController);
+            if (localAbortController) {
+                console.log('Debug: localAbortController.signal =', localAbortController.signal);
+                console.log('Debug: type of localAbortController.signal =', typeof localAbortController.signal);
+            } else {
+                console.error('Debug: localAbortController is null or undefined!');
+            }
+
+            localAbortController.signal.addEventListener('abort', () => {
                 analysisStream.close();
                 reject(new Error('Analysis aborted'));
             });
@@ -365,7 +419,10 @@ async function analyzeLocation(address) {
             `;
         }
     } finally {
-        currentAnalysisController = null;
+        // Only nullify if this is still the current controller
+        if (currentAnalysisController === localAbortController) {
+            currentAnalysisController = null;
+        }
     }
 }
 
@@ -471,16 +528,25 @@ fileInput.addEventListener('change', (e) => {
     const file = e.target.files[0];
     if (file) {
         const reader = new FileReader();
-        reader.onload = (e) => {
-            capturedImage = e.target.result;
-            showPreview(capturedImage);
+        reader.onload = async (loadEvent) => { // Make async and use different event var name
+            try {
+                // Max width/height 1280px, JPEG quality 0.75
+                const resizedImageBase64 = await resizeAndCompressImage(loadEvent.target.result, 1280, 1280, 0.75);
+                capturedImage = resizedImageBase64;
+                showPreview(capturedImage);
+            } catch (error) {
+                console.error("Error resizing image from file:", error);
+                capturedImage = loadEvent.target.result; // Fallback to original
+                showPreview(capturedImage);
+                alert("Could not resize image. Proceeding with original if possible.");
+            }
         };
         reader.readAsDataURL(file);
     }
 });
 
 // Capture frame
-function captureFrame() {
+async function captureFrame() { // Make async
     if (!isCameraOn) {
         alert('Please turn on the camera first.');
         return;
@@ -494,8 +560,18 @@ function captureFrame() {
     ctx.drawImage(camera, 0, 0);
 
     // Get base64 image data
-    capturedImage = canvas.toDataURL('image/jpeg');
-    showPreview(capturedImage);
+    const originalImageBase64 = canvas.toDataURL('image/jpeg'); // Default browser quality
+    try {
+        // Max width/height 1280px, JPEG quality 0.75
+        const resizedImageBase64 = await resizeAndCompressImage(originalImageBase64, 1280, 1280, 0.75);
+        capturedImage = resizedImageBase64;
+        showPreview(capturedImage);
+    } catch (error) {
+        console.error("Error resizing image from camera:", error);
+        capturedImage = originalImageBase64; // Fallback to original
+        showPreview(capturedImage);
+        alert("Could not resize image. Proceeding with original if possible.");
+    }
 }
 
 // Show preview
@@ -720,12 +796,7 @@ window.addEventListener('firebaseReady', () => {
         
         audioManager.stopAudio(); // Stop any playing audio immediately
         
-        // Cancel any ongoing analysis
-        if (currentAnalysisController) {
-            currentAnalysisController.abort();
-            currentAnalysisController = null;
-        }
-        
+        // The analyzeLocation function will handle cancelling any ongoing analysis
         await analyzeLocation(address);
     });
 });

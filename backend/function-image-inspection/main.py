@@ -18,8 +18,6 @@ from google.api_core.client_options import ClientOptions
 from google.api_core.exceptions import NotFound, PermissionDenied, ResourceExhausted
 from google.cloud import discoveryengine
 from google.genai import types
-import vertexai
-from vertexai.preview.generative_models import GenerativeModel, Part, SafetySetting, Tool, grounding
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -50,25 +48,38 @@ client_options = ClientOptions(api_endpoint=f"{LOCATION}-discoveryengine.googlea
 search_client = discoveryengine.SearchServiceClient(client_options=client_options)
 doc_client = discoveryengine.DocumentServiceClient(client_options=client_options)
 
-# Initialize Vertex AI clients
-# For Gemini 2.0
-genai_client = genai.Client(
+# Initialize Gemini 2.5 client
+gemini_2_5_client = genai.Client(
     vertexai=True,
     project="gemini-med-lit-review",
-    location="us-central1"
+    location="global"
 )
 
-# For Gemini 1.5
-vertexai.init(project="gemini-med-lit-review", location="us-central1")
-tools = [
-    Tool.from_google_search_retrieval(
-        google_search_retrieval=grounding.GoogleSearchRetrieval()
+# Model name
+GEMINI_2_5_MODEL_NAME = "gemini-2.5-pro-preview-06-05"
+
+# Common safety settings
+COMMON_SAFETY_SETTINGS = [
+    types.SafetySetting(
+        category="HARM_CATEGORY_HATE_SPEECH",
+        threshold="OFF"
+    ),
+    types.SafetySetting(
+        category="HARM_CATEGORY_DANGEROUS_CONTENT",
+        threshold="OFF"
+    ),
+    types.SafetySetting(
+        category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
+        threshold="OFF"
+    ),
+    types.SafetySetting(
+        category="HARM_CATEGORY_HARASSMENT",
+        threshold="OFF"
     )
 ]
-gemini_model = GenerativeModel(
-    "gemini-1.5-flash-001",
-    tools=tools
-)
+
+# Grounding tool for Google Search
+GROUNDING_TOOL = [types.Tool(google_search=types.GoogleSearch())]
 
 # RAG Utility Functions
 def search_datastore(query: str, data_store_id: str) -> list:
@@ -242,42 +253,33 @@ def generate_initial_response(inspection_type, image_data):
 
     print(f"Sending request to Gemini model with prompt length: {len(text_prompt)}")
     stream_logger.info("Processing visual elements...")
-    response = genai_client.models.generate_content(
-        model="gemini-2.0-flash-001",
+    
+    # Generate content with streaming
+    response_text = ""
+    for chunk in gemini_2_5_client.models.generate_content_stream(
+        model=GEMINI_2_5_MODEL_NAME,
         contents=contents,
         config=types.GenerateContentConfig(
             temperature=1,
             top_p=0.95,
             max_output_tokens=8192,
-            response_modalities=["TEXT"],
-            safety_settings=[
-                types.SafetySetting(
-                    category="HARM_CATEGORY_HATE_SPEECH",
-                    threshold="OFF"
-                ),
-                types.SafetySetting(
-                    category="HARM_CATEGORY_DANGEROUS_CONTENT",
-                    threshold="OFF"
-                ),
-                types.SafetySetting(
-                    category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
-                    threshold="OFF"
-                ),
-                types.SafetySetting(
-                    category="HARM_CATEGORY_HARASSMENT",
-                    threshold="OFF"
-                )
-            ],
-            tools=[types.Tool(google_search=types.GoogleSearch())],
+            safety_settings=COMMON_SAFETY_SETTINGS,
+            tools=GROUNDING_TOOL,
             system_instruction=[types.Part.from_text(text="""Return bounding boxes as a JSON array with labels. Never return masks or code fencing. Limit to 25 objects.
-If an object is present multiple times, name them according to their unique characteristic (colors, size, position, unique characteristics, etc..).""")]
+If an object is present multiple times, name them according to their unique characteristic (colors, size, position, unique characteristics, etc..).""")],
+            thinking_config=types.ThinkingConfig(
+                thinking_budget=128,
+            )
         )
-    )
-    print(f"Received response from Gemini model with length: {len(response.text)}")
+    ):
+        if chunk.text:
+            response_text += chunk.text
+    
+    print(f"Received response from Gemini model with length: {len(response_text)}")
     stream_logger.info("Identifying potential violations...")
 
     try:
-        response_text = response.text.strip()
+        response_text = response_text.strip()
         start = response_text.find('{')
         end = response_text.rfind('}') + 1
         if start != -1 and end != -1:
@@ -335,43 +337,26 @@ def verify_and_complete_response(initial_response, img):
         Ensure that the generated URL is correct and points to the specific section cited."""
         print(f"Verification prompt length: {len(verification_prompt)}")
 
-        generation_config = {
-            "max_output_tokens": 8192,
-            "temperature": 1,
-            "top_p": 0.95,
-        }
-
-        safety_settings = [
-            SafetySetting(
-                category=SafetySetting.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-                threshold=SafetySetting.HarmBlockThreshold.OFF
-            ),
-            SafetySetting(
-                category=SafetySetting.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                threshold=SafetySetting.HarmBlockThreshold.OFF
-            ),
-            SafetySetting(
-                category=SafetySetting.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-                threshold=SafetySetting.HarmBlockThreshold.OFF
-            ),
-            SafetySetting(
-                category=SafetySetting.HarmCategory.HARM_CATEGORY_HARASSMENT,
-                threshold=SafetySetting.HarmBlockThreshold.OFF
-            ),
-        ]
-
-        responses = gemini_model.generate_content(
-            [verification_prompt],
-            generation_config=generation_config,
-            safety_settings=safety_settings,
-            stream=True,
-        )
-        print(f"Received verification response for citation {index + 1}")
-
+        # Generate verification with streaming
         response_text = ""
-        for response in responses:
-            if response.candidates and response.candidates[0].content.parts:
-                response_text += response.text
+        for chunk in gemini_2_5_client.models.generate_content_stream(
+            model=GEMINI_2_5_MODEL_NAME,
+            contents=[types.Content(role="user", parts=[types.Part.from_text(text=verification_prompt)])],
+            config=types.GenerateContentConfig(
+                temperature=1,
+                top_p=0.95,
+                max_output_tokens=8192,
+                safety_settings=COMMON_SAFETY_SETTINGS,
+                tools=GROUNDING_TOOL,
+                thinking_config=types.ThinkingConfig(
+                    thinking_budget=128,
+                )
+            )
+        ):
+            if chunk.text:
+                response_text += chunk.text
+        
+        print(f"Received verification response for citation {index + 1}")
 
         try:
             response_text = response_text.strip()
@@ -421,42 +406,24 @@ def verify_and_complete_response(initial_response, img):
 
         Provide your response as a simple string without any JSON formatting or additional markup."""
 
-        generation_config = {
-            "max_output_tokens": 8192,
-            "temperature": 1,
-            "top_p": 0.95,
-        }
-
-        safety_settings = [
-            SafetySetting(
-                category=SafetySetting.HarmCategory.HARM_CATEGORY_HATE_SPEECH,
-                threshold=SafetySetting.HarmBlockThreshold.OFF
-            ),
-            SafetySetting(
-                category=SafetySetting.HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT,
-                threshold=SafetySetting.HarmBlockThreshold.OFF
-            ),
-            SafetySetting(
-                category=SafetySetting.HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT,
-                threshold=SafetySetting.HarmBlockThreshold.OFF
-            ),
-            SafetySetting(
-                category=SafetySetting.HarmCategory.HARM_CATEGORY_HARASSMENT,
-                threshold=SafetySetting.HarmBlockThreshold.OFF
-            ),
-        ]
-
-        summary_response = gemini_model.generate_content(
-            [summary_prompt],
-            generation_config=generation_config,
-            safety_settings=safety_settings,
-            stream=True,
-        )
-
+        # Generate summary with streaming
         summary_text = ""
-        for response in summary_response:
-            if response.candidates and response.candidates[0].content.parts:
-                summary_text += response.text
+        for chunk in gemini_2_5_client.models.generate_content_stream(
+            model=GEMINI_2_5_MODEL_NAME,
+            contents=[types.Content(role="user", parts=[types.Part.from_text(text=summary_prompt)])],
+            config=types.GenerateContentConfig(
+                temperature=1,
+                top_p=0.95,
+                max_output_tokens=8192,
+                safety_settings=COMMON_SAFETY_SETTINGS,
+                tools=GROUNDING_TOOL,
+                thinking_config=types.ThinkingConfig(
+                    thinking_budget=128,
+                )
+            )
+        ):
+            if chunk.text:
+                summary_text += chunk.text
         print(f"Generated summary with length: {len(summary_text)}")
         stream_logger.info("Finalizing analysis...")
 
