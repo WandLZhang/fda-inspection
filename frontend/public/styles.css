@@ -110,7 +110,7 @@ body {
   background-color: var(--background);
   font-family: var(--font);
   font-size: var(--size);
-  padding: var(--unit-4);
+  padding: 80px var(--unit-4) var(--unit-4) var(--unit-4);
 }
 
 /* Layout */
@@ -731,7 +731,7 @@ select[multiple] option {
 
 /* Main Content */
 main {
-  margin-top: 80px;
+  margin-top: 0;
   min-height: calc(100vh - 96px);
 }
 
