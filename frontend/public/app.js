@@ -29,21 +29,39 @@ class AudioManager {
     constructor() {
         this.currentAudio = null;
         this.currentAudioController = null;
+        this.currentEventSource = null;
+        this.audioQueue = [];
+        this.isStreamPlaying = false;
     }
 
     stopAudio() {
+        // Stop current audio playback
         if (this.currentAudio) {
             this.currentAudio.pause();
             this.currentAudio.currentTime = 0;
             this.currentAudio = null;
         }
+        
+        // Abort fetch controller (for old method)
         if (this.currentAudioController) {
             this.currentAudioController.abort();
             this.currentAudioController = null;
         }
+        
+        // Close SSE connection
+        if (this.currentEventSource) {
+            this.currentEventSource.close();
+            this.currentEventSource = null;
+        }
+        
+        // Clear audio queue
+        this.audioQueue = [];
+        this.isStreamPlaying = false;
     }
 
     async playAudio(text) {
+        // For now, keep the old method for backward compatibility
+        // This can be used as a fallback
         this.stopAudio();
         this.currentAudioController = new AbortController();
 
@@ -71,6 +89,120 @@ class AudioManager {
                 console.error('Error playing audio:', error);
             }
         }
+    }
+
+    playStreamedAudio(text) {
+        // Stop any existing audio/streams
+        this.stopAudio();
+
+        // Create SSE connection for streaming audio
+        // Using POST body for text is more complex with EventSource, 
+        // so we'll use a hybrid approach with POST to initiate
+        this._startStreamingAudio(text);
+    }
+
+    async _startStreamingAudio(text) {
+        try {
+            // For SSE with POST body, we need to use a different approach
+            // Option 1: Use GET with URL params (limited by URL length)
+            // Option 2: Use fetch with ReadableStream
+            // For now, let's use POST with fetch and read the stream manually
+            
+            const response = await fetch('https://us-central1-gemini-med-lit-review.cloudfunctions.net/fda-generate-audio', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'text/event-stream'  // Signal that we want streaming
+                },
+                body: JSON.stringify({ text })
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to start audio stream');
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || ''; // Keep incomplete line in buffer
+
+                for (const line of lines) {
+                    if (line.startsWith('event:')) {
+                        const eventType = line.substring(6).trim();
+                        continue;
+                    }
+                    if (line.startsWith('data:')) {
+                        const data = line.substring(5).trim();
+                        if (data) {
+                            try {
+                                const parsed = JSON.parse(data);
+                                this._handleStreamEvent(parsed);
+                            } catch (e) {
+                                console.error('Error parsing SSE data:', e);
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            console.error('Error in audio streaming:', error);
+            this.stopAudio();
+        }
+    }
+
+    _handleStreamEvent(data) {
+        if (data.audio) {
+            // Add audio chunk to queue
+            this.audioQueue.push(data.audio);
+            console.log(`Added audio chunk ${data.sentence_index + 1}/${data.total_sentences} to queue`);
+            
+            // Start playing if not already playing
+            this._playNextFromQueue();
+        } else if (data.error) {
+            console.error('Stream error:', data.error);
+        } else if (data.message === 'Stream finished') {
+            console.log('Audio stream finished');
+        }
+    }
+
+    _playNextFromQueue() {
+        // If already playing or queue is empty, return
+        if (this.isStreamPlaying || this.audioQueue.length === 0) {
+            return;
+        }
+
+        this.isStreamPlaying = true;
+        const audioBase64 = this.audioQueue.shift();
+
+        // Create audio element
+        this.currentAudio = new Audio(`data:audio/wav;base64,${audioBase64}`);
+        
+        // Set up event handlers
+        this.currentAudio.onended = () => {
+            this.isStreamPlaying = false;
+            this._playNextFromQueue(); // Play next chunk
+        };
+
+        this.currentAudio.onerror = (error) => {
+            console.error('Error playing audio chunk:', error);
+            this.isStreamPlaying = false;
+            // Try to play next chunk
+            this._playNextFromQueue();
+        };
+
+        // Start playback
+        this.currentAudio.play().catch(error => {
+            console.error('Failed to play audio:', error);
+            this.isStreamPlaying = false;
+            this._playNextFromQueue();
+        });
     }
 }
 
@@ -404,9 +536,9 @@ async function analyzeLocation(address) {
             ${finalResults}
         `;
 
-        // Automatically play audio
+        // Automatically play audio using streaming
         const speechText = `Activity Level: ${activityLabel}. ${activityDescription} ${observations.join('. ')}`;
-        await audioManager.playAudio(speechText);
+        audioManager.playStreamedAudio(speechText);
     } catch (error) {
         if (error.name === 'AbortError') {
             console.log('Analysis was cancelled');
@@ -782,8 +914,8 @@ async function processInspection() {
                         
                     case 'SUMMARY_GENERATED':
                         summary = data.data.summary;
-                        // Play the summary audio
-                        audioManager.playAudio(summary);
+                        // Play the summary audio using streaming
+                        audioManager.playStreamedAudio(summary);
                         break;
                         
                     case 'ANALYSIS_FINALIZING':
@@ -910,8 +1042,8 @@ function displayCitations(citations, summary) {
     `;
     citationResults.appendChild(summaryContainer);
 
-    // Automatically play summary audio
-    audioManager.playAudio(summary);
+    // Automatically play summary audio using streaming
+    audioManager.playStreamedAudio(summary);
 
     // Add individual citation cards
     citations.forEach(citation => {

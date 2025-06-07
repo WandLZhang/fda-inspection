@@ -1,11 +1,13 @@
 import functions_framework
-from flask import jsonify
+from flask import jsonify, Response, stream_with_context, request
 import base64
 import logging
 import os
 import mimetypes
 import struct
 import time
+import re
+import json
 from google import genai
 from google.genai import types
 
@@ -185,26 +187,87 @@ def generate_gemini_audio(text: str) -> bytes | None:
         return None
 
 
+def split_into_sentences(text: str) -> list[str]:
+    """
+    Splits text into sentences based on common punctuation.
+    Handles '.', '!', '?'.
+    """
+    # Split by sentence-ending punctuation followed by whitespace
+    sentences = re.split(r'(?<=[.!?])\s+', text.strip())
+    
+    # Filter out empty strings and strip whitespace
+    processed_sentences = [s.strip() for s in sentences if s.strip()]
+    
+    return processed_sentences
+
+
+def generate_audio_events(text_to_speak):
+    """Generator function for SSE events."""
+    try:
+        sentences = split_into_sentences(text_to_speak)
+        if not sentences:
+            yield f"event: stream_error\ndata: {json.dumps({'error': 'No sentences to process'})}\n\n"
+            return
+
+        print(f"[SSE] Processing {len(sentences)} sentences")
+        
+        for i, sentence in enumerate(sentences):
+            print(f"[SSE] Processing sentence {i+1}/{len(sentences)}: {sentence[:50]}...")
+            start_time = time.time()
+            
+            # Generate audio for this sentence
+            audio_bytes = generate_gemini_audio(sentence)
+            
+            if audio_bytes:
+                base64_audio = base64.b64encode(audio_bytes).decode('utf-8')
+                event_data = {
+                    'audio': base64_audio,
+                    'sentence_index': i,
+                    'total_sentences': len(sentences),
+                    'sentence_text': sentence[:100]  # First 100 chars for debugging
+                }
+                yield f"event: audio_chunk\ndata: {json.dumps(event_data)}\n\n"
+                print(f"[SSE] Sent audio chunk for sentence {i+1} in {time.time() - start_time:.2f}s")
+            else:
+                # Send error event for this chunk
+                error_data = {
+                    'sentence_index': i,
+                    'error': 'Failed to generate audio for this sentence'
+                }
+                yield f"event: chunk_error\ndata: {json.dumps(error_data)}\n\n"
+                print(f"[SSE] Failed to generate audio for sentence {i+1}")
+        
+        # Signal end of stream
+        yield f"event: stream_end\ndata: {json.dumps({'message': 'Stream finished'})}\n\n"
+        print("[SSE] Stream finished")
+        
+    except Exception as e:
+        print(f"[SSE] Error in stream: {e}")
+        yield f"event: stream_error\ndata: {json.dumps({'error': str(e)})}\n\n"
+
+
 @functions_framework.http
 def fda_generate_audio(request):
+    # Check if this is a streaming request
+    is_stream_request = 'text/event-stream' in request.headers.get('Accept', '')
+    
     # Set CORS headers for preflight requests
     if request.method == 'OPTIONS':
         headers = {
             'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Methods': 'POST',
-            'Access-Control-Allow-Headers': 'Content-Type',
+            'Access-Control-Allow-Methods': 'POST, GET, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type, Accept',
             'Access-Control-Max-Age': '3600'
         }
         return ('', 204, headers)
 
-    # Set CORS headers for main requests
+    # Set common CORS headers for main requests
     headers = {
         'Access-Control-Allow-Origin': '*'
     }
 
     try:
-        overall_start_time = time.time()
-        
+        # Get text from request
         request_json = request.get_json()
         if not request_json or 'text' not in request_json:
             return (jsonify({'error': 'Text is required'}), 400, headers)
@@ -212,24 +275,44 @@ def fda_generate_audio(request):
         text = request_json['text']
         print(f"Generating audio for text: {text[:50]}... (length: {len(text)} chars)")
         
-        # Generate audio
-        audio_gen_start = time.time()
-        audio_data = generate_gemini_audio(text)
-        print(f"[PERF] Audio generation call: {time.time() - audio_gen_start:.4f}s")
+        # Handle streaming request
+        if is_stream_request:
+            print("Handling streaming audio request")
+            # Create streaming response
+            response = Response(
+                stream_with_context(generate_audio_events(text)),
+                mimetype='text/event-stream',
+                headers={
+                    'Access-Control-Allow-Origin': '*',
+                    'Cache-Control': 'no-cache',
+                    'Connection': 'keep-alive',
+                    'X-Accel-Buffering': 'no'  # Disable proxy buffering
+                }
+            )
+            return response
         
-        if not audio_data:
-            return (jsonify({'error': 'Failed to generate audio'}), 500, headers)
+        # Handle non-streaming request (original behavior)
+        else:
+            overall_start_time = time.time()
+            
+            # Generate audio
+            audio_gen_start = time.time()
+            audio_data = generate_gemini_audio(text)
+            print(f"[PERF] Audio generation call: {time.time() - audio_gen_start:.4f}s")
+            
+            if not audio_data:
+                return (jsonify({'error': 'Failed to generate audio'}), 500, headers)
 
-        # Convert to base64
-        b64_start_time = time.time()
-        audio_content_base64 = base64.b64encode(audio_data).decode('utf-8')
-        print(f"[PERF] Base64 encoding: {time.time() - b64_start_time:.4f}s, encoded size: {len(audio_content_base64)} chars")
-        
-        print(f"[PERF] Total request handling time: {time.time() - overall_start_time:.4f}s")
-        
-        return (jsonify({
-            'audio': audio_content_base64  # Base64 encoded audio content
-        }), 200, headers)
+            # Convert to base64
+            b64_start_time = time.time()
+            audio_content_base64 = base64.b64encode(audio_data).decode('utf-8')
+            print(f"[PERF] Base64 encoding: {time.time() - b64_start_time:.4f}s, encoded size: {len(audio_content_base64)} chars")
+            
+            print(f"[PERF] Total request handling time: {time.time() - overall_start_time:.4f}s")
+            
+            return (jsonify({
+                'audio': audio_content_base64  # Base64 encoded audio content
+            }), 200, headers)
         
     except Exception as e:
         logger.error(f"Error processing request: {e}")
