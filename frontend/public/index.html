@@ -55,34 +55,32 @@
             <div class="camera-container" style="position: relative; margin-bottom: 24px;">
                 <!-- Camera and preview container -->
                 <div style="height: 300px;">
-                    <video id="camera" autoplay playsinline></video>
+                    <video id="camera" autoplay playsinline style="display: none;"></video>
+                    <div id="cameraPlaceholder" class="camera-placeholder">
+                        <span class="material-icons">photo_camera</span>
+                        <p>Click "Camera" to start or upload an image</p>
+                    </div>
                 </div>
                 <!-- Controls container -->
                 <div class="controls-container" style="position: absolute; bottom: 0; left: 0; right: 0;">
-                    <div style="display: flex; justify-content: space-between;">
-                        <!-- Left side buttons -->
-                        <div style="display: flex; gap: 8px;">
-                            <button id="cameraToggle" class="control-button">
-                                <span class="material-icons">videocam</span>
-                                <span>Camera</span>
-                            </button>
-                            <button id="captureButton" class="control-button">
-                                <span class="material-icons">photo_camera</span>
-                                <span>Capture</span>
-                            </button>
-                        </div>
-                        <!-- Right side buttons -->
-                        <div style="display: flex; gap: 8px;">
-                            <button id="retakeButton" class="control-button" style="display: none;">
-                                <span class="material-icons">refresh</span>
-                                <span>Retake</span>
-                            </button>
-                            <label class="control-button upload-button" style="cursor: pointer;">
-                                <span class="material-icons">upload</span>
-                                <span>Upload</span>
-                                <input type="file" id="fileInput" accept="image/*" style="display: none;">
-                            </label>
-                        </div>
+                    <div style="display: flex; justify-content: center; gap: 8px;">
+                        <button id="cameraToggle" class="control-button">
+                            <span class="material-icons">videocam</span>
+                            <span>Camera</span>
+                        </button>
+                        <button id="captureButton" class="control-button">
+                            <span class="material-icons">photo_camera</span>
+                            <span>Capture</span>
+                        </button>
+                        <button id="retakeButton" class="control-button" style="display: none;">
+                            <span class="material-icons">refresh</span>
+                            <span>Retake</span>
+                        </button>
+                        <label class="control-button upload-button" style="cursor: pointer;">
+                            <span class="material-icons">upload</span>
+                            <span>Upload</span>
+                            <input type="file" id="fileInput" accept="image/*" style="display: none;">
+                        </label>
                     </div>
                 </div>
             </div>

@@ -648,6 +648,21 @@ function switchView(view) {
         if (preview) preview.remove();
         citationResults.innerHTML = '';
         inspectionInput.value = '';
+        
+        // Reset camera view to show placeholder
+        camera.style.display = 'none';
+        const placeholder = document.getElementById('cameraPlaceholder');
+        if (placeholder) placeholder.style.display = 'flex';
+        
+        // If camera was on, turn it off
+        if (isCameraOn) {
+            if (mediaStream) {
+                mediaStream.getTracks().forEach(track => track.stop());
+                camera.srcObject = null;
+            }
+            isCameraOn = false;
+            cameraToggle.querySelector('.material-icons').textContent = 'videocam_off';
+        }
     }
     
     currentView = view;
@@ -660,6 +675,8 @@ function switchView(view) {
 
 // Camera Controls
 async function toggleCamera() {
+    const placeholder = document.getElementById('cameraPlaceholder');
+    
     if (!isCameraOn) {
         try {
             mediaStream = await navigator.mediaDevices.getUserMedia({
@@ -670,6 +687,10 @@ async function toggleCamera() {
             camera.srcObject = mediaStream;
             isCameraOn = true;
             cameraToggle.querySelector('.material-icons').textContent = 'videocam';
+            
+            // Hide placeholder and show camera
+            if (placeholder) placeholder.style.display = 'none';
+            camera.style.display = 'block';
         } catch (err) {
             console.error('Error accessing camera:', err);
             alert('Unable to access camera. Please ensure you have granted camera permissions.');
@@ -681,6 +702,10 @@ async function toggleCamera() {
         }
         isCameraOn = false;
         cameraToggle.querySelector('.material-icons').textContent = 'videocam_off';
+        
+        // Show placeholder and hide camera
+        camera.style.display = 'none';
+        if (placeholder) placeholder.style.display = 'flex';
     }
 }
 
@@ -754,7 +779,7 @@ function showPreview(imageData) {
     // Show preview
     const preview = document.createElement('img');
     preview.src = imageData;
-    preview.style.cssText = 'position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background-color: black; z-index: 10;';
+    preview.style.cssText = 'position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; z-index: 10;';
     preview.id = 'preview';
     
     // Remove any existing preview
@@ -763,8 +788,10 @@ function showPreview(imageData) {
         existingPreview.remove();
     }
     
-    // Hide the camera
+    // Hide the camera and placeholder
     camera.style.display = 'none';
+    const placeholder = document.getElementById('cameraPlaceholder');
+    if (placeholder) placeholder.style.display = 'none';
     
     // Add preview to the camera container
     const cameraContainer = camera.parentElement;
@@ -799,8 +826,15 @@ function retakePhoto() {
     // Clear background input
     inspectionInput.value = '';
     
-    // Ensure camera is visible
-    camera.style.display = 'block';
+    // Show appropriate view based on camera state
+    const placeholder = document.getElementById('cameraPlaceholder');
+    if (isCameraOn) {
+        camera.style.display = 'block';
+        if (placeholder) placeholder.style.display = 'none';
+    } else {
+        camera.style.display = 'none';
+        if (placeholder) placeholder.style.display = 'flex';
+    }
 }
 
 // Process Inspection

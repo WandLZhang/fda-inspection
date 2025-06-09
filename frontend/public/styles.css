@@ -772,17 +772,61 @@ main {
 
 /* Camera Styles */
 #camera {
-  background-color: #000;
   object-fit: cover;
-  border-radius: var(--unit-4);
+  border-radius: inherit;
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 
 .camera-container {
   position: relative;
-  background: var(--surface-container-lowest);
+  background: var(--surface-container-low);
+  background-image: 
+    radial-gradient(circle at 25% 25%, var(--primary-container) 0%, transparent 50%),
+    radial-gradient(circle at 75% 75%, var(--secondary-container) 0%, transparent 50%);
+  background-size: 50% 50%;
+  background-position: 0 0, 100% 100%;
+  background-repeat: no-repeat;
   border-radius: var(--unit-4);
   overflow: hidden;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s ease;
+}
+
+.camera-container:hover {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+}
+
+/* Camera placeholder when inactive */
+.camera-placeholder {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--on-surface-variant);
+  text-align: center;
+  padding: var(--unit-6);
+}
+
+.camera-placeholder .material-icons {
+  font-size: 64px;
+  opacity: 0.3;
+  margin-bottom: var(--unit-4);
+  color: var(--primary);
+}
+
+.camera-placeholder p {
+  font-size: 1rem;
+  opacity: 0.7;
+  margin: 0;
+}
+
+/* Smooth transitions for camera states */
+.camera-container > * {
+  transition: opacity 0.3s ease;
 }
 
 /* Controls */
@@ -801,28 +845,54 @@ main {
   border-radius: var(--unit-6);
   font-weight: 500;
   transition: all 0.2s ease;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  line-height: 1.2;
+  background-color: transparent;
+  color: var(--on-surface-variant);
+  border: none;
 }
 
 .control-button:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  background-color: rgba(0, 0, 0, 0.05);
 }
 
 #cameraToggle {
-  background: linear-gradient(135deg, var(--primary), var(--secondary));
+  /* Inherits default control-button styling */
 }
 
 #captureButton {
-  background: linear-gradient(135deg, var(--error), #ff6b6b);
+  background-color: var(--primary);
+  color: var(--on-primary);
+}
+
+#captureButton:hover {
+  background-color: var(--on-primary-container);
 }
 
 #retakeButton {
-  background: linear-gradient(135deg, #f59e0b, #fbbf24);
+  /* Inherits default control-button styling */
 }
 
 .upload-button {
-  background: linear-gradient(135deg, var(--tertiary), #34d399);
+  /* Inherits default control-button styling */
+}
+
+/* Ensure label.control-button matches button.control-button styling */
+label.control-button {
+  font-size: var(--size); /* Match button font-size exactly */
+  padding: var(--unit-3) var(--unit-4); /* Explicitly set same padding as .control-button */
+  top: auto; /* Reset positioning from general label styles */
+  left: auto;
+  margin-bottom: 0; /* Reset margin from general label styles */
+  z-index: auto; /* Reset z-index */
+  height: auto; /* Match button height behavior */
+  vertical-align: middle; /* Ensure proper alignment */
+  /* Allow background-color, color, and border to be inherited from .control-button */
+}
+
+/* Ensure button.control-button overrides general button padding */
+button.control-button {
+  padding: var(--unit-3) var(--unit-4); /* Override general button padding */
 }
 
 /* Question Box */
